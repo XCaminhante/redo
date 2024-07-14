@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # An implementation of djb's redo, written in bourne shell since everyone has that
 # See cr.yp.to/redo.html for more about redo
@@ -9,8 +9,8 @@
 # Date: Fri Apr 15 00:26:30 CDT 2016
 
 # Runtime Info
-PROGNAME=$(basename "$0")
-TARGETS=$@
+PROGNAME="$(basename "$0")"
+TARGETS=("$@")
 METADIR=.redo
 
 # Log Messages :: 1:Level, 2:Msg
@@ -18,11 +18,11 @@ msg_() {
   level_="$1: "
   shift
   case "$level_" in
-    info*) level_=
+      info*) level_=
   esac
   echo "${level_}$*" 1>&2
   case "$level_" in
-    abort*) exit 111 ;;
+      abort*) exit 111 ;;
   esac
 }
 
@@ -44,31 +44,28 @@ GetBase() {
 
 # Clean old sums for a file :: 1:Dependency 2:Target
 CleanChangeSum() {
-  for a in $METADIR/$2/change/*
-  do
+  for a in "$METADIR/$2/change/"*; do
     [ ! -e "$a" ] || [ "$(cat "$a")" != "$1" ] || rm "$a"
   done
 }
 
 CleanCreateSum() {
-  for b in $METADIR/$2/create/*
-  do
+  for b in "$METADIR/$2/create/"*; do
     [ ! -e "$b" ] || [ "$(cat "$b")" != "$1" ] || rm "$b"
   done
 }
 
 # Clean out all sums for a target :: 1:Target
 CleanAll() {
- [ ! -d "$METADIR/$1" ] || rm -rf "$METADIR/$1/*"
+  [ ! -d "$METADIR/$1" ] || rm -rf "$METADIR/$1/*"
 }
 
 # Get sum for dep :: 1:Dependency 2:Target -> Sum
 GetChangeSum() {
-  for c in $METADIR/$2/change/*
+  for c in "$METADIR/$2/change/"*
   do
     [ "$c" != "" ] || return
-    if [ "$(cat "$c")" = "$1" ]
-    then
+    if [ "$(cat "$c")" = "$1" ]; then
       basename "$c"
       return
     fi
@@ -81,8 +78,7 @@ UpToDate() {
   NEWSUM=$(md5sum "$1" | cut -f1 -d' ')
   OLDSUM=""
 
-  for d in $METADIR/$2/change/*
-  do
+  for d in "$METADIR/$2/change/"*; do
     [ ! -e "$d" ] || [ "$(cat "$d")" != "$1" ] || OLDSUM="$(basename "$d")"
   done
 
@@ -94,14 +90,11 @@ UpToDate() {
 # Get the correct do file for target :: 1:Target -> Do File
 DoPath() {
   target="$1"
-  if [ "$(GetExtension "$target")" = "do" ]
-  then
+  if [ "$(GetExtension "$target")" = "do" ]; then
     echo ""
-  elif [ -e "$target.do" ]
-  then
+  elif [ -e "$target.do" ]; then
     echo "$target.do"
-  elif [ -e "$(dirname "$target")/default.$(GetExtension "$target").do" ]
-  then
+  elif [ -e "$(dirname "$target")/default.$(GetExtension "$target").do" ]; then
     echo "$(dirname "$target")/default.$(GetExtension "$target").do"
   fi
 }
@@ -132,10 +125,8 @@ DoRedo() {
   [ -d "$METADIR/$target/change" ] || mkdir -p "$METADIR/$target/change/"
   [ -d "$METADIR/$target/create" ] || mkdir -p "$METADIR/$target/create/"
 
-  if [ -z "$doPath" ]
-  then
-    if [ ! -e "$target" ]
-    then
+  if [ -z "$doPath" ]; then
+    if [ ! -e "$target" ]; then
       msg_ "abort" "No .do file found for target: $target"
     fi
   else
@@ -149,15 +140,11 @@ DoRedo() {
     [ -e "$target" ] || trigger=1
 
     # Check if any creates exist
-    if [ $trigger -ne 1 ]
-    then
-      for e in $METADIR/$target/create/*
-      do
-        if [ -e "$e" ]
-        then
+    if [ $trigger -ne 1 ]; then
+      for e in "$METADIR/$target/create/"*; do
+        if [ -e "$e" ]; then
           dep="$(cat "$e")"
-          if [ -e "$dep" ]
-          then
+          if [ -e "$dep" ]; then
             msg_ "abort" "$dep exists but should be created"
           else
             trigger=1
@@ -168,12 +155,9 @@ DoRedo() {
 
     # If not triggering due to do file change (or lack of target)
     # do loop and possible rebuild target
-    if [ $trigger -ne 1 ]
-    then
-      for f in $METADIR/$target/change/*
-      do
-        if [ -e "$f" ]
-        then
+    if [ $trigger -ne 1 ]; then
+      for f in "$METADIR/$target/change/"*; do
+        if [ -e "$f" ]; then
           dep="$(cat "$f")"
           oldsum="$(basename "$f")"
           REDO_TARGET="$target" redo-ifchange "$dep"
@@ -182,8 +166,7 @@ DoRedo() {
       done
     fi
 
-    if [ $trigger -eq 1 ]
-    then
+    if [ $trigger -eq 1 ]; then
       msg_ "info" "redo $target"
       CleanAll "$target"
       GenChangeSum "$doPath" "$target"
@@ -191,23 +174,22 @@ DoRedo() {
       # Check if there is a #! on first line
       # If so run it instead of assuming /bin/sh
       cmd="$(GetSheBang "$doPath")"
-      if [ "$cmd" = "" ]
-      then
-        PATH=.:$PATH REDO_TARGET="$target" sh -e "$doPath" 0 "$(GetBase "$target")" "$tmp" > "$tmp"
+      if [ "$cmd" = "" ]; then
+        PATH=".:$PATH" REDO_TARGET="$target" \
+            sh -e "$doPath" 0 "$(GetBase "$target")" "$tmp" > "$tmp"
       else
-        PATH=.:$PATH REDO_TARGET="$target" sh -c "$cmd  \"$doPath\" 0 \"$(GetBase "$target")\" \"$tmp\" > \"$tmp\""
+        PATH=".:$PATH" REDO_TARGET="$target" \
+            sh -c "$cmd  \"$doPath\" 0 \"$(GetBase "$target")\" \"$tmp\" > \"$tmp\""
       fi
 
 
       RC=$?
-      if [ $RC -ne 0 ]
-      then
+      if [ $RC -ne 0 ]; then
         msg_ "error" "Redo script exited with a non-zero exit code: $RC"
         rm "$tmp"
         exit $RC
       else
-        if [ "$(ls -s "$tmp" | cut -f1 -d' ')" = "0" ]
-        then
+        if [ "$(ls -s "$tmp" | cut -f1 -d' ')" = "0" ]; then
           rm "$tmp"
         else
           mv "$tmp" "$target"
@@ -217,35 +199,29 @@ DoRedo() {
   fi
 }
 
-
-# Main
 case "$PROGNAME" in
-  redo-ifchange)
-    [ "$REDO_TARGET" != "" ] || msg_ "abort" "REDO_TARGET not set"
+    redo-ifchange)
+      [ "$REDO_TARGET" != "" ] || msg_ "abort" "REDO_TARGET not set"
 
-    for target in $TARGETS
-    do
-      DoRedo "$target"
-      [ "$(UpToDate "$target" "$REDO_TARGET")" = "true" ] || GenChangeSum "$target" "$REDO_TARGET"
-    done
-    ;;
-  redo-ifcreate)
-    [ "$REDO_TARGET" != "" ] || msg_ "abort" "REDO_TARGET not set"
+      for target in "${TARGETS[@]}"; do
+        DoRedo "$target"
+        [ "$(UpToDate "$target" "$REDO_TARGET")" = "true" ] || GenChangeSum "$target" "$REDO_TARGET"
+      done
+      ;;
+    redo-ifcreate)
+      [ "$REDO_TARGET" != "" ] || msg_ "abort" "REDO_TARGET not set"
 
-    for target in $TARGETS
-    do
-      [ ! -e "$target" ] || msg_ "abort" "$target exists but should be created"
+      for target in "${TARGETS[@]}"; do
+        [ ! -e "$target" ] || msg_ "abort" "$target exists but should be created"
+        DoRedo "$target"
 
-      DoRedo "$target"
-
-      [ ! -e "$target" ] || GenCreateSum "$target" "$REDO_TARGET"
-    done
-    ;;
-  *)
-    for target in $TARGETS
-    do
-      REDO_TARGET="$target"
-      DoRedo "$target"
-    done
-    ;;
+        [ ! -e "$target" ] || GenCreateSum "$target" "$REDO_TARGET"
+      done
+      ;;
+    *)
+      for target in "${TARGETS[@]}"; do
+        REDO_TARGET="$target"
+        DoRedo "$target"
+      done
+      ;;
 esac
