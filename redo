@@ -187,6 +187,7 @@ DoRedo() {
       if [ $RC -ne 0 ]; then
         msg_ "error" "Redo script exited with a non-zero exit code: $RC"
         rm "$tmp"
+        rm -vf "$target"
         exit $RC
       else
         if [ "$(ls -s "$tmp" | cut -f1 -d' ')" = "0" ]; then
