@@ -4,7 +4,7 @@
 #    or
 # redo install
 
-BINDIR=$HOME/.local/bin
+BINDIR=$HOME/bin
 
 which redo-ifchange 1>/dev/null
 [ $? -ne 0 ] || redo-ifchange redo
@@ -14,5 +14,5 @@ which redo-ifchange 1>/dev/null
 [ ! -e $BINDIR/redo-ifchange ] || rm -f $BINDIR/redo-ifchange
 
 install redo $BINDIR
-ln -sf $BINDIR/redo{,-ifchange}
-ln -sf $BINDIR/redo{,-ifcreate}
+ln -sf ./redo $BINDIR/redo-ifchange
+ln -sf ./redo $BINDIR/redo-ifcreate
