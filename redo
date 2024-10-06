@@ -9,7 +9,8 @@
 # This work is placed in the Public Domain
 
 PROGNAME="$(basename "$0")"
-METADIR="$(pwd)/.redo"
+PROJECTROOT="$(pwd)"
+METADIR="${PROJECTROOT}/.redo"
 PARALLELJOBS=${PARALLELJOBS:=4}
 
 #@+others
@@ -91,6 +92,8 @@ function DoPath {
     echo "${1}.do"
   elif [ -e "$(dirname "$1")/default.$(Extension "$1").do" ]; then
     echo "$(dirname "$1")/default.$(Extension "$1").do"
+  elif [ -e "${PROJECTROOT}/default.$(Extension "$1").do" ]; then
+    echo "${PROJECTROOT}/default.$(Extension "$1").do"
   else
     echo ""
   fi

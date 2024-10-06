@@ -41,14 +41,13 @@
 <v t="caminhante.20241004145244.5"><vh>/example/</vh>
 <v t="caminhante.20241006001330.12"><vh>/quux/</vh>
 <v t="caminhante.20241006001348.4"><vh>@edit baz.c</vh></v>
-<v t="caminhante.20241006001348.1"><vh>default.o.do</vh></v>
 </v>
 <v t="caminhante.20241006001330.11"><vh>@edit bar bar.c</vh></v>
+<v t="caminhante.20241006001330.8"><vh>@edit clean.do</vh></v>
 <v t="caminhante.20241006001330.7"><vh>@edit common.h</vh></v>
+<v t="caminhante.20241006001330.6"><vh>@edit default.o.do</vh></v>
+<v t="caminhante.20241006001330.4"><vh>@edit example.do</vh></v>
 <v t="caminhante.20241006001330.3"><vh>@edit foo foo.c</vh></v>
-<v t="caminhante.20241006001330.8"><vh>clean.do</vh></v>
-<v t="caminhante.20241006001330.6"><vh>default.o.do</vh></v>
-<v t="caminhante.20241006001330.4"><vh>example.do</vh></v>
 </v>
 <v t="caminhante.20241004145244.3"><vh>@edit install.do</vh></v>
 <v t="caminhante.20241004145244.4"><vh>@edit README.md</vh></v>
@@ -336,9 +335,5 @@ c.redraw(c.p)
 <t tx="caminhante.20241004145244.6">@path .git</t>
 <t tx="caminhante.20241004171132.3"></t>
 <t tx="caminhante.20241006001330.12">@path quux</t>
-<t tx="caminhante.20241006001330.4"></t>
-<t tx="caminhante.20241006001330.6"></t>
-<t tx="caminhante.20241006001330.8"></t>
-<t tx="caminhante.20241006001348.1"></t>
 </tnodes>
 </leo_file>
