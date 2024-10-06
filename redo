@@ -1,228 +1,191 @@
 #!/bin/bash
-
-# An implementation of djb's redo, written in bourne shell since everyone has that
+#@+leo-ver=5-thin
+#@+node:caminhante.20241004145243.1: * @file redo
+#@@first
+#@@language shell
+#@@tabwidth -2
+# An implementation of djb's redo, written in bash shell
 # See cr.yp.to/redo.html for more about redo
-#
-# Written by Jeff Parent
-# Released as Public Domain
-# Version: 0.3.2
-# Date: Fri Apr 15 00:26:30 CDT 2016
+# This work is placed in the Public Domain
 
-# Runtime Info
 PROGNAME="$(basename "$0")"
-TARGETS=("$@")
-METADIR=.redo
+METADIR="$(pwd)/.redo"
+PARALLELJOBS=${PARALLELJOBS:=4}
 
-# Log Messages :: 1:Level, 2:Msg
-msg_() {
-  level_="$1: "
+#@+others
+#@+node:caminhante.20241004145644.1: ** Msg
+function Msg {
+  local level="$1: "
   shift
-  case "$level_" in
-      info*) level_=
+  case "$level" in
+    info) level=
   esac
-  echo "${level_}$*" 1>&2
-  case "$level_" in
-      abort*) exit 111 ;;
+  echo "${level}$*" 1>&2
+  case "$level" in
+    abort) exit 111 ;;
   esac
 }
-
-# Get Extension from file name :: 1:Filename -> Extension
-GetExtension() {
-  target="$1"
-  ext=$(echo "$target" | sed 's/.*\.//')
-
-  if [ "$target" != "$ext" ]
-  then
-    echo "$ext"
-  fi
+#@+node:caminhante.20241004145740.1: ** Basename
+function Basename {
+  echo "${1%%.*}"
 }
-
-# Get the opposite of the extension :: 1:Filename -> Base File Name
-GetBase() {
-  echo "$1" | sed 's/\(.*\)\..*/\1/'
+#@+node:caminhante.20241004145733.1: ** Extension
+function Extension {
+  echo "${1#*.}"
 }
-
-# Clean old sums for a file :: 1:Dependency 2:Target
-CleanChangeSum() {
-  for a in "$METADIR/$2/change/"*; do
-    [ ! -e "$a" ] || [ "$(cat "$a")" != "$1" ] || rm "$a"
-  done
+#@+node:caminhante.20241004145728.1: ** TargetChangesFile
+function TargetChangesFile {
+  echo "${METADIR}/${1}/md5.sum"
 }
-
-CleanCreateSum() {
-  for b in "$METADIR/$2/create/"*; do
-    [ ! -e "$b" ] || [ "$(cat "$b")" != "$1" ] || rm "$b"
-  done
+#@+node:caminhante.20241004145721.1: ** TargetCreatesFile
+function TargetCreatesFile {
+  echo "${METADIR}/${1}/exists.txt"
 }
-
-# Clean out all sums for a target :: 1:Target
-CleanAll() {
-  [ ! -d "$METADIR/$1" ] || rm -rf "$METADIR/$1/*"
+#@+node:caminhante.20241004145710.1: ** AddIfChange
+function AddIfChange {
+  sed -i "\%${1}$% d" "$(TargetChangesFile "$2")"
+  md5sum "$1" >> "$(TargetChangesFile "$2")"
 }
-
-# Get sum for dep :: 1:Dependency 2:Target -> Sum
-GetChangeSum() {
-  for c in "$METADIR/$2/change/"*
-  do
-    [ "$c" != "" ] || return
-    if [ "$(cat "$c")" = "$1" ]; then
-      basename "$c"
-      return
-    fi
-  done
+#@+node:caminhante.20241004145705.1: ** AddIfCreate
+function AddIfCreate {
+  sed -i "\%${1}$% d" "$(targetCreatesFile "$2")"
+  echo "$1" >> "$(targetCreatesFile "$2")"
 }
-
-# Check if dep matches its sum :: 1:Dependency 2:Target -> true/false
-UpToDate() {
-  retVal="false"
-  NEWSUM=$(md5sum "$1" | cut -f1 -d' ')
-  OLDSUM=""
-
-  for d in "$METADIR/$2/change/"*; do
-    [ ! -e "$d" ] || [ "$(cat "$d")" != "$1" ] || OLDSUM="$(basename "$d")"
-  done
-
-  [ "$OLDSUM" != "$NEWSUM" ] || retVal="true"
-
-  echo "$retVal"
+#@+node:caminhante.20241005225255.1: ** DependencySum
+function DependencySum {
+  sed -r "\%${1}$% !d; s%(^.{32})  ${1}%\1%" "$(TargetChangesFile "$2")"
 }
-
-# Get the correct do file for target :: 1:Target -> Do File
-DoPath() {
-  target="$1"
-  if [ "$(GetExtension "$target")" = "do" ]; then
+#@+node:caminhante.20241004181939.1: ** ClearMetadata
+function ClearMetadata {
+  echo -n > "$(TargetChangesFile "$1")"
+  echo -n > "$(TargetCreatesFile "$1")"
+}
+#@+node:caminhante.20241004185656.1: ** InitializeMetadata
+function InitializeMetadata {
+  mkdir -p "${METADIR}/${1}"
+  touch "$(TargetChangesFile "$1")" "$(TargetCreatesFile "$1")"
+}
+#@+node:caminhante.20241004145659.1: ** TargetChanged
+function TargetChanged {
+  ! md5sum --quiet --check "$(TargetChangesFile "$1")" >/dev/null 2>/dev/null || \
+  ! grep -Eq "${1}$" "$(TargetChangesFile "$1")"
+}
+#@+node:caminhante.20241004145655.1: ** TargetCantCreate
+function TargetCantCreate {
+  ! xargs -a "$(TargetCreatesFile "$1")" -r -I% \[ ! -e "%" \]
+}
+#@+node:caminhante.20241004213342.1: ** TargetDependencies
+function TargetDependencies {
+  [ -f "$(TargetChangesFile "$1")" ] && \
+    sed -r 's/^.{32}  //' "$(TargetChangesFile "$1")"
+}
+#@+node:caminhante.20241004214728.1: ** IsTarget
+function IsTarget {
+  local target="$1"
+  local doPath="$(DoPath "$target")"
+  [ ! -z "$doPath" ]
+}
+#@+node:caminhante.20241004174234.1: ** DoPath
+function DoPath {
+  if [ -e "${1}.do" ]; then
+    echo "${1}.do"
+  elif [ -e "$(dirname "$1")/default.$(Extension "$1").do" ]; then
+    echo "$(dirname "$1")/default.$(Extension "$1").do"
+  else
     echo ""
-  elif [ -e "$target.do" ]; then
-    echo "$target.do"
-  elif [ -e "$(dirname "$target")/default.$(GetExtension "$target").do" ]; then
-    echo "$(dirname "$target")/default.$(GetExtension "$target").do"
   fi
 }
-
-# Generate Checksum :: 1:Dependency 2:Target
-GenChangeSum() {
-  sum=$(md5sum "$1" 2>/dev/null | cut -f1 -d' ')
-  CleanChangeSum "$1" "$2"
-  echo "$1" > "$METADIR/$2/change/$sum"
+#@+node:caminhante.20241004201517.1: ** Rebuild
+function Rebuild {
+  local target="$1"
+  local doPath="$2"
+  local tmp="${target}--redoing"
+  local RC=111
+  Msg "info" "Redoing $target"
+  ClearMetadata "$target"
+  AddIfChange "$doPath" "$target"
+  if [ -x "$doPath" ]; then
+    REDO_TARGET="$target" "$doPath" 0 "$(Basename "$target")" "$tmp" > "$tmp"
+  else
+    REDO_TARGET="$target" sh -c '$0 $1 $2 $3' "$doPath" 0 "$(Basename "$target")" "$tmp" > "$tmp"
+  fi
+  RC=$?
+  if [ $RC -ne 0 ]; then
+    Msg "error" "Dofile exited with a non-zero exit code: $RC"
+    rm -f "$tmp" "$target"
+    exit $RC
+  elif [ -s "$tmp" ]; then
+    mv "$tmp" "$target"
+    return 0
+  else
+    rm -f "$tmp" "$target"
+    return 1
+  fi
 }
-
-GenCreateSum() {
-  sum=$(md5sum "$1" 2>/dev/null | cut -f1 -d' ')
-  CleanCreateSum "$1" "$2"
-  echo "$1" > "$METADIR/$2/create/$sum"
-}
-
-GetSheBang() {
-  [ ! -e "$1" ] || echo "$(head -n 1 "$1" | grep "^#!" | sed 's/^#!//')"
-}
-
-# Build target if it needs a redo :: 1:target
-DoRedo() {
-  target="$1"
-  tmp="$target---redoing"
-  doPath="$(DoPath "$target")"
-
-  [ -d "$METADIR/$target/change" ] || mkdir -p "$METADIR/$target/change/"
-  [ -d "$METADIR/$target/create" ] || mkdir -p "$METADIR/$target/create/"
-
-  if [ -z "$doPath" ]; then
-    if [ ! -e "$target" ]; then
-      msg_ "abort" "No .do file found for target: $target"
+#@+node:caminhante.20241004200445.1: ** Redo
+function Redo {
+  local file="$1"
+  local doPath="$(DoPath "$file")"
+  local isTarget=true
+  [ -z "$doPath" ] && isTarget=false
+  if $isTarget; then
+    InitializeMetadata "$file"
+    if TargetCantCreate "$file"; then
+      Msg "error" "The following files should be created by a dofile but already exist:"
+      xargs -a "$(TargetCreatesFile "$file")" -r -I% find "%" 2>/dev/null
+      exit 111
+    fi
+    TargetDependencies "$file" | ( while read dep; do
+      if IsTarget "$dep" && [ "$dep" != "$file" ]; then
+        # local oldSum="$(DependencySum "$dep" "$file")"
+        # Msg "debug" "** oldsum $dep: $oldSum"
+        REDO_TARGET="$file" Redo "$dep" &
+        # local actualSum="$(md5sum "$dep" | sed -r 's/(^.{32}).*/\1/')"
+        # Msg "debug" "** actual $dep: $actualSum"
+        # if [ "$oldSum" != "$actualSum" ]; then
+          # Msg "debug" "** dependency $dep changed"
+        # fi
+        while [ $(jobs -p | wc -l) -ge $PARALLELJOBS ]; do
+          Msg "info" "waiting for $PARALLELJOBS processes"
+          wait -n
+        done
+      fi
+    done; wait; )
+    if TargetChanged "$file"; then
+      Rebuild "$file" "$doPath" && AddIfChange "$file" "$file"
     fi
   else
-
-    trigger=0
-
-    # If do file changes
-    [ "$(UpToDate "$doPath" "$target")" = "true" ] || trigger=1
-
-    # If target file does not exist
-    [ -e "$target" ] || trigger=1
-
-    # Check if any creates exist
-    if [ $trigger -ne 1 ]; then
-      for e in "$METADIR/$target/create/"*; do
-        if [ -e "$e" ]; then
-          dep="$(cat "$e")"
-          if [ -e "$dep" ]; then
-            msg_ "abort" "$dep exists but should be created"
-          else
-            trigger=1
-          fi
-        fi
-      done
-    fi
-
-    # If not triggering due to do file change (or lack of target)
-    # do loop and possible rebuild target
-    if [ $trigger -ne 1 ]; then
-      for f in "$METADIR/$target/change/"*; do
-        if [ -e "$f" ]; then
-          dep="$(cat "$f")"
-          oldsum="$(basename "$f")"
-          REDO_TARGET="$target" redo-ifchange "$dep"
-          [ "$oldsum" = "$(GetChangeSum "$dep" "$target")" ] || trigger=1
-        fi
-      done
-    fi
-
-    if [ $trigger -eq 1 ]; then
-      msg_ "info" "redo $target"
-      CleanAll "$target"
-      GenChangeSum "$doPath" "$target"
-
-      # Check if there is a #! on first line
-      # If so run it instead of assuming /bin/sh
-      cmd="$(GetSheBang "$doPath")"
-      if [ "$cmd" = "" ]; then
-        PATH=".:$PATH" REDO_TARGET="$target" \
-            sh -e "$doPath" 0 "$(GetBase "$target")" "$tmp" > "$tmp"
-      else
-        PATH=".:$PATH" REDO_TARGET="$target" \
-            sh -c "$cmd  \"$doPath\" 0 \"$(GetBase "$target")\" \"$tmp\" > \"$tmp\""
-      fi
-
-
-      RC=$?
-      if [ $RC -ne 0 ]; then
-        msg_ "error" "Redo script exited with a non-zero exit code: $RC"
-        rm "$tmp"
-        rm -vf "$target"
-        exit $RC
-      else
-        if [ "$(ls -s "$tmp" | cut -f1 -d' ')" = "0" ]; then
-          rm "$tmp"
-        else
-          mv "$tmp" "$target"
-        fi
-      fi
+    if [ ! -e "$file" ]; then
+      Msg "abort" "No dofile found for $file"
+    else
+      AddIfChange "$file" "$REDO_TARGET"
     fi
   fi
 }
+#@-others
 
 case "$PROGNAME" in
-    redo-ifchange)
-      [ "$REDO_TARGET" != "" ] || msg_ "abort" "REDO_TARGET not set"
-
-      for target in "${TARGETS[@]}"; do
-        DoRedo "$target"
-        [ "$(UpToDate "$target" "$REDO_TARGET")" = "true" ] || GenChangeSum "$target" "$REDO_TARGET"
-      done
-      ;;
-    redo-ifcreate)
-      [ "$REDO_TARGET" != "" ] || msg_ "abort" "REDO_TARGET not set"
-
-      for target in "${TARGETS[@]}"; do
-        [ ! -e "$target" ] || msg_ "abort" "$target exists but should be created"
-        DoRedo "$target"
-
-        [ ! -e "$target" ] || GenCreateSum "$target" "$REDO_TARGET"
-      done
-      ;;
-    *)
-      for target in "${TARGETS[@]}"; do
-        REDO_TARGET="$target"
-        DoRedo "$target"
-      done
-      ;;
+redo-ifchange)
+  [ -z "$REDO_TARGET" ] && Msg "abort" "REDO_TARGET not set"
+  for dep; do
+    dep="$(readlink -m "$dep")"
+    Redo "$dep" && AddIfChange "$dep" "$REDO_TARGET"
+  done
+;;
+redo-ifcreate)
+  [ -z "$REDO_TARGET" ] && Msg "abort" "REDO_TARGET not set"
+  for arg; do
+    arg="$(readlink -m "$arg")"
+    [ -e "$dep" ] && Msg "abort" "$dep exists but should be created by a dofile"
+    Redo "$dep" && AddIfCreate "$dep" "$REDO_TARGET"
+  done
+;;
+redo)
+  for arg; do
+    arg="$(readlink -m "$arg")"
+    REDO_TARGET="$arg"
+    Redo "$arg"
+  done
+;;
 esac
+#@-leo

@@ -1,18 +1,13 @@
-# Install using sh or using redo
-# Obviously use sh only on the first install
-# /bin/sh install.do
+# sh install.do
 #    or
 # redo install
 
-BINDIR=$HOME/bin
+BINDIR="$HOME"/bin
 
-which redo-ifchange 1>/dev/null
-[ $? -ne 0 ] || redo-ifchange redo
+[ -e "$BINDIR"/redo ] && rm -f "$BINDIR"/redo
+[ -e "$BINDIR"/redo-ifcreate ] && rm -f "$BINDIR"/redo-ifcreate
+[ -e "$BINDIR"/redo-ifchange ] && rm -f "$BINDIR"/redo-ifchange
 
-[ ! -e $BINDIR/redo ] || rm -f $BINDIR/redo
-[ ! -e $BINDIR/redo-ifcreate ] || rm -f $BINDIR/redo-ifcreate
-[ ! -e $BINDIR/redo-ifchange ] || rm -f $BINDIR/redo-ifchange
-
-install redo $BINDIR
-ln -sf ./redo $BINDIR/redo-ifchange
-ln -sf ./redo $BINDIR/redo-ifcreate
+install redo "$BINDIR"
+ln -sf ./redo "$BINDIR"/redo-ifchange
+ln -sf ./redo "$BINDIR"/redo-ifcreate

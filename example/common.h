@@ -3,8 +3,6 @@ typedef struct X {
   float c;
 } X;
 
-int function(int);
-
+int function (int);
 const int BAR = 6;
-
 int adder (int, int);
