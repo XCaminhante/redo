@@ -138,6 +138,7 @@ function Redo {
   [ -z "$doPath" ] && isTarget=false
   if $isTarget; then
     InitializeMetadata "$file"
+    { flock -x 3
     if TargetCantCreate "$file"; then
       Msg "error" "The following files should be created by a dofile but already exist:"
       xargs -a "$(TargetCreatesFile "$file")" -r -I% find "%" 2>/dev/null
@@ -164,6 +165,7 @@ function Redo {
       Rebuild "$file" "$doPath" && AddIfChange "$file" "$file"
       true
     fi
+    } 3>>"$(TargetCreatesFile "$file")"
   else
     if [ ! -e "$file" ]; then
       Msg "abort" "No dofile found for $file"
