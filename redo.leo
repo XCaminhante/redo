@@ -36,19 +36,22 @@
 </v>
 <v t="caminhante.20241004145006.2"><vh>Bash script redo</vh>
 <v t="caminhante.20241004145240.1"><vh>@path .</vh>
-<v t="caminhante.20241004145244.7"><vh>@edit .gitignore</vh></v>
 <v t="caminhante.20241004145244.6"><vh>/.git/</vh></v>
 <v t="caminhante.20241004145244.5"><vh>/example/</vh>
+<v t="caminhante.20241007002226.1"><vh>/build/</vh>
+<v t="caminhante.20241007020356.3"><vh>@edit clean.do</vh></v>
+<v t="caminhante.20241007020356.2"><vh>@edit default.o.do</vh></v>
+<v t="caminhante.20241007020356.1"><vh>@edit example.do</vh></v>
+</v>
 <v t="caminhante.20241006001330.12"><vh>/quux/</vh>
 <v t="caminhante.20241006001348.4"><vh>@edit baz.c</vh></v>
 </v>
 <v t="caminhante.20241006001330.11"><vh>@edit bar bar.c</vh></v>
-<v t="caminhante.20241006001330.8"><vh>@edit clean.do</vh></v>
 <v t="caminhante.20241006001330.7"><vh>@edit common.h</vh></v>
-<v t="caminhante.20241006001330.6"><vh>@edit default.o.do</vh></v>
-<v t="caminhante.20241006001330.4"><vh>@edit example.do</vh></v>
 <v t="caminhante.20241006001330.3"><vh>@edit foo foo.c</vh></v>
 </v>
+<v t="caminhante.20241007025220.1"><vh>@clean Makefile</vh></v>
+<v t="caminhante.20241004145244.7"><vh>@edit .gitignore</vh></v>
 <v t="caminhante.20241004145244.3"><vh>@edit install.do</vh></v>
 <v t="caminhante.20241004145244.4"><vh>@edit README.md</vh></v>
 <v t="caminhante.20241004145243.1"><vh>@file redo</vh></v>
@@ -335,5 +338,20 @@ c.redraw(c.p)
 <t tx="caminhante.20241004145244.6">@path .git</t>
 <t tx="caminhante.20241004171132.3"></t>
 <t tx="caminhante.20241006001330.12">@path quux</t>
+<t tx="caminhante.20241007002226.1">@path build</t>
+<t tx="caminhante.20241007025220.1">@tabwidth 4
+all: example
+
+install: FORCE
+	@redo $@
+
+example: FORCE
+	@redo example/build/example
+
+clean: FORCE
+	@redo example/build/clean
+
+FORCE: ;
+</t>
 </tnodes>
 </leo_file>

@@ -2,4 +2,4 @@
 *---redoing
 *.o
 *.d
-example/example
+example/build/example

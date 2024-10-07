@@ -9,8 +9,6 @@
 # This work is placed in the Public Domain
 
 PROGNAME="$(basename "$0")"
-PROJECTROOT="$(pwd)"
-METADIR="${PROJECTROOT}/.redo"
 PARALLELJOBS=${PARALLELJOBS:=4}
 
 #@+others
@@ -26,8 +24,13 @@ function Msg {
     abort) exit 111 ;;
   esac
 }
-#@+node:caminhante.20241004145740.1: ** Basename
+#@+node:caminhante.20241007003617.1: ** Basename
 function Basename {
+  local bn="${1%%.*}"
+  echo "${bn##*/}"
+}
+#@+node:caminhante.20241004145740.1: ** BasenamePath
+function BasenamePath {
   echo "${1%%.*}"
 }
 #@+node:caminhante.20241004145733.1: ** Extension
@@ -92,8 +95,8 @@ function DoPath {
     echo "${1}.do"
   elif [ -e "$(dirname "$1")/default.$(Extension "$1").do" ]; then
     echo "$(dirname "$1")/default.$(Extension "$1").do"
-  elif [ -e "${PROJECTROOT}/default.$(Extension "$1").do" ]; then
-    echo "${PROJECTROOT}/default.$(Extension "$1").do"
+  elif [ -e "${BUILDDIR}/default.$(Extension "$1").do" ]; then
+    echo "${BUILDDIR}/default.$(Extension "$1").do"
   else
     echo ""
   fi
@@ -104,13 +107,15 @@ function Rebuild {
   local doPath="$2"
   local tmp="${target}--redoing"
   local RC=111
+  mkdir -p "$(dirname "$target")"
   Msg "info" "Redoing $target"
   ClearMetadata "$target"
   AddIfChange "$doPath" "$target"
+  export BUILDDIR METADIR
   if [ -x "$doPath" ]; then
-    REDO_TARGET="$target" "$doPath" 0 "$(Basename "$target")" "$tmp" > "$tmp"
+    REDO_TARGET="$target" "$doPath" "$(Basename "$target")" "$(BasenamePath "$target")" "$tmp" > "$tmp"
   else
-    REDO_TARGET="$target" sh -c '$0 $1 $2 $3' "$doPath" 0 "$(Basename "$target")" "$tmp" > "$tmp"
+    REDO_TARGET="$target" sh -c '$0 $1 $2 $3' "$doPath" "$(Basename "$target")" "$(BasenamePath "$target")" "$tmp" > "$tmp"
   fi
   RC=$?
   if [ $RC -ne 0 ]; then
@@ -119,10 +124,10 @@ function Rebuild {
     exit $RC
   elif [ -s "$tmp" ]; then
     mv "$tmp" "$target"
-    return 0
+    true
   else
     rm -f "$tmp" "$target"
-    return 1
+    false
   fi
 }
 #@+node:caminhante.20241004200445.1: ** Redo
@@ -154,14 +159,17 @@ function Redo {
         done
       fi
     done; wait; )
+    false
     if TargetChanged "$file"; then
       Rebuild "$file" "$doPath" && AddIfChange "$file" "$file"
+      true
     fi
   else
     if [ ! -e "$file" ]; then
       Msg "abort" "No dofile found for $file"
     else
       AddIfChange "$file" "$REDO_TARGET"
+      true
     fi
   fi
 }
@@ -170,14 +178,20 @@ function Redo {
 case "$PROGNAME" in
 redo-ifchange)
   [ -z "$REDO_TARGET" ] && Msg "abort" "REDO_TARGET not set"
+  [ -z "$BUILDDIR" ] && Msg "abort" "BUILDDIR not set"
+  [ -z "$METADIR" ] && Msg "abort" "METADIR not set"
   for dep; do
+    cd "$BUILDDIR"
     dep="$(readlink -m "$dep")"
     Redo "$dep" && AddIfChange "$dep" "$REDO_TARGET"
   done
 ;;
 redo-ifcreate)
   [ -z "$REDO_TARGET" ] && Msg "abort" "REDO_TARGET not set"
+  [ -z "$BUILDDIR" ] && Msg "abort" "BUILDDIR not set"
+  [ -z "$METADIR" ] && Msg "abort" "METADIR not set"
   for arg; do
+    cd "$BUILDDIR"
     arg="$(readlink -m "$arg")"
     [ -e "$dep" ] && Msg "abort" "$dep exists but should be created by a dofile"
     Redo "$dep" && AddIfCreate "$dep" "$REDO_TARGET"
@@ -187,6 +201,9 @@ redo)
   for arg; do
     arg="$(readlink -m "$arg")"
     REDO_TARGET="$arg"
+    BUILDDIR="$(dirname "$arg")"
+    METADIR="${BUILDDIR}/.redo"
+    cd "$BUILDDIR"
     Redo "$arg"
   done
 ;;

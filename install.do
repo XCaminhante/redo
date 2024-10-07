@@ -1,6 +1,6 @@
 # sh install.do
-#    or
 # redo install
+# make install
 
 BINDIR="$HOME"/bin
 
