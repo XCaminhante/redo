@@ -115,7 +115,7 @@ function Rebuild {
   if [ -x "$doPath" ]; then
     REDO_TARGET="$target" "$doPath" "$(Basename "$target")" "$(BasenamePath "$target")" "$tmp" > "$tmp"
   else
-    REDO_TARGET="$target" sh -c '$0 $1 $2 $3' "$doPath" "$(Basename "$target")" "$(BasenamePath "$target")" "$tmp" > "$tmp"
+    REDO_TARGET="$target" sh "$doPath" "$(Basename "$target")" "$(BasenamePath "$target")" "$tmp" > "$tmp"
   fi
   RC=$?
   if [ $RC -ne 0 ]; then

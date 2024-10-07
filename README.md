@@ -69,6 +69,10 @@ If `redo common.h` is run and `version.txt` exits then it will fail. Otherwise y
     redo version.txt
     redo common.h
 
+### Parallel jobs
+
+redo by default runs up to 4 sub processes in parallel. You can control the number of parallel jobs with the PARALLELJOBS variable.
+
 ## Troubleshooting
 
 If you ever run into issues (I doubt you will) and just want to rebuild the entire system, remove the `.redo` directory
