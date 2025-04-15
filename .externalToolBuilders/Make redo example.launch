@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<launchConfiguration type="org.eclipse.ui.externaltools.ProgramBuilderLaunchConfigurationType">
+    <stringAttribute key="org.eclipse.debug.core.ATTR_REFRESH_SCOPE" value="${project}"/>
+    <booleanAttribute key="org.eclipse.debug.ui.ATTR_LAUNCH_IN_BACKGROUND" value="false"/>
+    <stringAttribute key="org.eclipse.ui.externaltools.ATTR_BUILD_SCOPE" value="${working_set:&lt;?xml version=&quot;1.0&quot; encoding=&quot;UTF-8&quot;?&gt;&#10;&lt;resources&gt;&#10;&lt;item path=&quot;/redo/.gitignore&quot; type=&quot;1&quot;/&gt;&#10;&lt;item path=&quot;/redo/.project&quot; type=&quot;1&quot;/&gt;&#10;&lt;item path=&quot;/redo/.settings&quot; type=&quot;2&quot;/&gt;&#10;&lt;item path=&quot;/redo/Makefile&quot; type=&quot;1&quot;/&gt;&#10;&lt;item path=&quot;/redo/example/bar bar.c&quot; type=&quot;1&quot;/&gt;&#10;&lt;item path=&quot;/redo/example/build/clean.do&quot; type=&quot;1&quot;/&gt;&#10;&lt;item path=&quot;/redo/example/build/default.o.do&quot; type=&quot;1&quot;/&gt;&#10;&lt;item path=&quot;/redo/example/build/example.do&quot; type=&quot;1&quot;/&gt;&#10;&lt;item path=&quot;/redo/example/common.h&quot; type=&quot;1&quot;/&gt;&#10;&lt;item path=&quot;/redo/example/foo foo.c&quot; type=&quot;1&quot;/&gt;&#10;&lt;item path=&quot;/redo/example/quux&quot; type=&quot;2&quot;/&gt;&#10;&lt;item path=&quot;/redo/example/sources.do&quot; type=&quot;1&quot;/&gt;&#10;&lt;item path=&quot;/redo/install.do&quot; type=&quot;1&quot;/&gt;&#10;&lt;item path=&quot;/redo/redo&quot; type=&quot;1&quot;/&gt;&#10;&lt;item path=&quot;/redo/redo.sh&quot; type=&quot;1&quot;/&gt;&#10;&lt;/resources&gt;}"/>
+    <stringAttribute key="org.eclipse.ui.externaltools.ATTR_LOCATION" value="/bin/make"/>
+    <stringAttribute key="org.eclipse.ui.externaltools.ATTR_RUN_BUILD_KINDS" value="incremental,auto,"/>
+    <stringAttribute key="org.eclipse.ui.externaltools.ATTR_TOOL_ARGUMENTS" value="example"/>
+    <booleanAttribute key="org.eclipse.ui.externaltools.ATTR_TRIGGERS_CONFIGURED" value="true"/>
+    <stringAttribute key="org.eclipse.ui.externaltools.ATTR_WORKING_DIRECTORY" value="${build_project}"/>
+</launchConfiguration>

@@ -54,6 +54,11 @@ Dependencies are rebuilt based on file changes, using checksum hashes rather tha
 
 redo only considers a file that has a dofile as a target, otherwise it will be treated as a source. redo does not try to modify source files.
 
+### Computed Dependencies
+
+This version of redo also has computed dependencies. Instead of a file content, the output of a executable is considered as the dependency.
+The executable output hash is stored and compared at every redo run. If this hash changes, redo rebuilds the associated target.
+
 ### Required Creates
 
 If you need a file to not exist prior to building, call `redo-ifcreate <list of deps>` to mark it as a non-existent
@@ -71,7 +76,9 @@ If `redo common.h` is run and `version.txt` exits then it will fail. Otherwise y
 
 ### Parallel jobs
 
-redo by default runs up to 4 sub processes in parallel. You can control the number of parallel jobs with the PARALLELJOBS variable.
+I gave up on bringing make's jobserver compatibility for the moment, sorry.
+
+redo will run all instances it can for a target in parallel (and wait for them).
 
 ## Troubleshooting
 
@@ -88,6 +95,8 @@ Try out the example code with `make example` or run `redo example/build/example`
     redo install
     sh install.do
 
+Any of these will work.
+
 ## License
 
 I'm releasing this work into the Public Domain.
@@ -99,5 +108,5 @@ For more information about redo see [djb's site](http://cr.yp.to/redo.html).
 A [youtube video](https://www.youtube.com/watch?v=zZ_nI9E9g0I) by jekor goes through creating a version of redo written
 in Haskell.
 
-This [thesis paper](http://grosskurth.ca/papers/mmath-thesis.pdf) by
-A. Grosskurth goes through many build systems and then details redo.
+This [thesis paper](http://grosskurth.ca/papers/mmath-thesis.pdf) by A. Grosskurth goes through many build systems and
+then details redo.

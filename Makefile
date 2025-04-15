@@ -1,12 +1,12 @@
 all: example
 
 install: FORCE
-	@redo $@
+	@./redo $@
 
 example: FORCE
-	@redo example/build/example
+	@./redo example/build/example
 
 clean: FORCE
-	@redo example/build/clean
+	@./redo example/build/clean
 
 FORCE: ;

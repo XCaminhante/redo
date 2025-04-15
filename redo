@@ -1,18 +1,12 @@
 #!/bin/bash
-#@+leo-ver=5-thin
-#@+node:caminhante.20241004145243.1: * @file redo
-#@@first
-#@@language shell
-#@@tabwidth -2
 # An implementation of djb's redo, written in bash shell
 # See cr.yp.to/redo.html for more about redo
 # This work is placed in the Public Domain
 
 PROGNAME="$(basename "$0")"
-PARALLELJOBS=${PARALLELJOBS:=4}
 
-#@+others
-#@+node:caminhante.20241004145644.1: ** Msg
+#NODE Utilities
+#NODE * Msg
 function Msg {
   local level="$1: "
   shift
@@ -24,72 +18,134 @@ function Msg {
     abort) exit 111 ;;
   esac
 }
-#@+node:caminhante.20241007003617.1: ** Basename
+#NODE * Basename
+# /home/user/t.a.b.c => t
 function Basename {
   local bn="${1%%.*}"
   echo "${bn##*/}"
 }
-#@+node:caminhante.20241004145740.1: ** BasenamePath
+#NODE * BasenamePath
+# /home/user/t.a.b.c => /home/user/t
 function BasenamePath {
-  echo "${1%%.*}"
+  echo "${1%%\.*}"
 }
-#@+node:caminhante.20241004145733.1: ** Extension
+#NODE * Extension
+# /home/user/t.a.b.c => a.b.c
 function Extension {
   echo "${1#*.}"
 }
-#@+node:caminhante.20241004145728.1: ** TargetChangesFile
+#NODE * Checksum
+function Checksum {
+  [ ! -f "$1" ] && echo '00000000000000000000000000000000'
+  md5sum "$1" | grep -oE '^.{32}'
+}
+#NODE * OpenTempFile
+function OpenTempFile {
+  local tmp="$(mktemp -t "XXX.tmp")"
+  exec 10<>"$tmp"
+  rm "$tmp"
+}
+#NODE * CloseTempFile
+function CloseTempFile {
+  exec 10>&-
+}
+#NODE * SortFile
+function SortFile {
+  OpenTempFile
+  sort -g -k1 "$1" > /proc/self/fd/10
+  cat /proc/self/fd/10 > "$1"
+  CloseTempFile
+}
+#NODE Dependencies' database
+#NODE * TargetChangesFile
+# MD5 hashes of dependency files
 function TargetChangesFile {
   echo "${METADIR}/${1}/md5.sum"
 }
-#@+node:caminhante.20241004145721.1: ** TargetCreatesFile
+#NODE * TargetCreatesFile
+# Paths of files that must not exist at (re)build time (some dofile will create them)
 function TargetCreatesFile {
   echo "${METADIR}/${1}/exists.txt"
 }
-#@+node:caminhante.20241004145710.1: ** AddIfChange
+#NODE * TargetComputedChangesFile
+# MD5 hashes of computed dependencies (dependencies on executables' outputs)
+function TargetComputedChangesFile {
+  echo "${METADIR}/${1}/compmd5.sum"
+}
+#NODE * AddIfChange
 function AddIfChange {
-  sed -i "\%${1}$% d" "$(TargetChangesFile "$2")"
-  md5sum "$1" >> "$(TargetChangesFile "$2")"
+  { flock -x 4
+  OpenTempFile
+  sed -r "\%^.{32}  ${1}$% d" "$(TargetChangesFile "$2")" > /proc/self/fd/10
+  cat /proc/self/fd/10 > "$(TargetChangesFile "$2")"
+  CloseTempFile
+  #grep -Eq "^.{32}  ${1}$" "$(TargetChangesFile "$2")" && Msg abort "AddIfChange: sed remotion of '${1}' failed"
+  md5sum "$1" >> "$(TargetChangesFile "$2")";
+  } 4>>"$(TargetChangesFile "$2")"
 }
-#@+node:caminhante.20241004145705.1: ** AddIfCreate
+#NODE * AddIfCreate
 function AddIfCreate {
-  sed -i "\%${1}$% d" "$(targetCreatesFile "$2")"
-  echo "$1" >> "$(targetCreatesFile "$2")"
+  { flock -x 6
+  OpenTempFile
+  sed -r "\%^${1}$% d" "$(targetCreatesFile "$2")" > /proc/self/fd/10
+  cat /proc/self/fd/10 > "$(targetCreatesFile "$2")"
+  CloseTempFile
+  #grep -Eq "^${1}$" "$(TargetCreatesFile "$2")" && Msg abort "AddIfCreate: sed remotion of '${1}' failed"
+  echo "$1" >> "$(targetCreatesFile "$2")";
+  } 6>>"$(targetCreatesFile "$2")"
 }
-#@+node:caminhante.20241005225255.1: ** DependencySum
+#NODE * AddIfComputedChange
+function AddIfComputedChange {
+  { flock -x 7
+  OpenTempFile
+  sed -r "\%^.{32} \*${1}$% d" "$(TargetComputedChangesFile "$2")" > /proc/self/fd/10
+  cat /proc/self/fd/10 > "$(TargetComputedChangesFile "$2")"
+  CloseTempFile
+  #grep -Eq "^.{32} \*${1}$" "$(TargetComputedChangesFile "$2")" && Msg abort "AddIfComputedChange: sed remotion of '${1}' failed"
+  cd "$(dirname "$1")"
+  "$1" | md5sum -b - | sed -r "s%-$%${1}%" >> "$(TargetComputedChangesFile "$2")"
+  } 7>>"$(TargetComputedChangesFile "$2")"
+}
+#NODE * DependencySum
 function DependencySum {
-  sed -r "\%${1}$% !d; s%(^.{32})  ${1}%\1%" "$(TargetChangesFile "$2")"
+  sed -r "\%  ${1}$% !d; s%(^.{32})  ${1}%\1%" "$(TargetChangesFile "$2")"
 }
-#@+node:caminhante.20241004181939.1: ** ClearMetadata
+#NODE * ComputedSum
+function ComputedSum {
+  sed -r "\% \*${1}$% !d; s%(^.{32}) \*${1}%\1%" "$(TargetComputedChangesFile "$2")"
+}
+#NODE * ClearMetadata
 function ClearMetadata {
+  InitializeMetadata "$1"
   echo -n > "$(TargetChangesFile "$1")"
   echo -n > "$(TargetCreatesFile "$1")"
+  echo -n > "$(TargetComputedChangesFile "$1")"
 }
-#@+node:caminhante.20241004185656.1: ** InitializeMetadata
+#NODE * InitializeMetadata
 function InitializeMetadata {
   mkdir -p "${METADIR}/${1}"
-  touch "$(TargetChangesFile "$1")" "$(TargetCreatesFile "$1")"
+  touch "$(TargetChangesFile "$1")" "$(TargetCreatesFile "$1")" "$(TargetComputedChangesFile "$1")"
 }
-#@+node:caminhante.20241004145659.1: ** TargetChanged
-function TargetChanged {
-  ! md5sum --quiet --check "$(TargetChangesFile "$1")" >/dev/null 2>/dev/null || \
-  ! grep -Eq "${1}$" "$(TargetChangesFile "$1")"
+#NODE * IsDependencyOf
+function IsDependencyOf {
+  grep -Eq "  ${1}$" "$(TargetChangesFile "$2")"
 }
-#@+node:caminhante.20241004145655.1: ** TargetCantCreate
+#NODE * TargetDependencies
+function TargetDependencies {
+  [ -s "$(TargetChangesFile "$1")" ] && \
+    sed -r 's/^.{32}  //' "$(TargetChangesFile "$1")"
+}
+#NODE * TargetComputedDependencies
+function TargetComputedDependencies {
+  [ -s "$(TargetComputedChangesFile "$1")" ] && \
+    sed -r 's/^.{32} \*//' "$(TargetComputedChangesFile "$1")"
+}
+#NODE Target/dependencies operations
+#NODE * TargetCantCreate
 function TargetCantCreate {
   ! xargs -a "$(TargetCreatesFile "$1")" -r -I% \[ ! -e "%" \]
 }
-#@+node:caminhante.20241004213342.1: ** TargetDependencies
-function TargetDependencies {
-  [ -f "$(TargetChangesFile "$1")" ] && \
-    sed -r 's/^.{32}  //' "$(TargetChangesFile "$1")"
-}
-#@+node:caminhante.20241004214728.1: ** IsTarget
-function IsTarget {
-  local target="$1"
-  local doPath="$(DoPath "$target")"
-  [ ! -z "$doPath" ]
-}
-#@+node:caminhante.20241004174234.1: ** DoPath
+#NODE * DoPath
 function DoPath {
   if [ -e "${1}.do" ]; then
     echo "${1}.do"
@@ -101,22 +157,21 @@ function DoPath {
     echo ""
   fi
 }
-#@+node:caminhante.20241004201517.1: ** Rebuild
-function Rebuild {
+#NODE * BuildTarget
+function BuildTarget {
   local target="$1"
   local doPath="$2"
+  [ -z "$doPath" ] && doPath="$(DoPath "$target")"
   local tmp="${target}--redoing"
   local RC=111
   mkdir -p "$(dirname "$target")"
-  Msg "info" "Redoing $target"
+  Msg "info" "Building target '$target'"
   ClearMetadata "$target"
   AddIfChange "$doPath" "$target"
-  export BUILDDIR METADIR
-  if [ -x "$doPath" ]; then
-    REDO_TARGET="$target" "$doPath" "$(Basename "$target")" "$(BasenamePath "$target")" "$tmp" > "$tmp"
-  else
-    REDO_TARGET="$target" sh "$doPath" "$(Basename "$target")" "$(BasenamePath "$target")" "$tmp" > "$tmp"
-  fi
+  cd "$(dirname "$target")"
+  #Msg debug "BuildTarget: REDO_TARGET='$target' *$([ -x "$doPath" ] || echo 'sh ')'$doPath'* '$(Basename "$target")' '$(BasenamePath "$target")' '$tmp'"
+  REDO_TARGET="$target" $([ -x "$doPath" ] || echo sh) "$doPath" \
+    "$(Basename "$target")" "$(BasenamePath "$target")" "$tmp" > "$tmp"
   RC=$?
   if [ $RC -ne 0 ]; then
     Msg "error" "Dofile exited with a non-zero exit code: $RC"
@@ -126,78 +181,99 @@ function Rebuild {
     mv "$tmp" "$target"
     true
   else
+    #Msg debug "'$doPath' output is empty"
     rm -f "$tmp" "$target"
     false
   fi
 }
-#@+node:caminhante.20241004200445.1: ** Redo
+#NODE * Redo
 function Redo {
   local file="$1"
   local doPath="$(DoPath "$file")"
-  local isTarget=true
-  [ -z "$doPath" ] && isTarget=false
+  local isTarget=$([ -z "$doPath" ] && echo false || echo true)
   if $isTarget; then
+    local dep
     InitializeMetadata "$file"
-    { flock -x 3
+    #NODE ** a) verify files that must be created by a dofile
     if TargetCantCreate "$file"; then
       Msg "error" "The following files should be created by a dofile but already exist:"
       xargs -a "$(TargetCreatesFile "$file")" -r -I% find "%" 2>/dev/null
       exit 111
     fi
-    TargetDependencies "$file" | ( while read dep; do
-      if IsTarget "$dep" && [ "$dep" != "$file" ]; then
-        # local oldSum="$(DependencySum "$dep" "$file")"
-        # Msg "debug" "** oldsum $dep: $oldSum"
-        REDO_TARGET="$file" Redo "$dep" &
-        # local actualSum="$(md5sum "$dep" | sed -r 's/(^.{32}).*/\1/')"
-        # Msg "debug" "** actual $dep: $actualSum"
-        # if [ "$oldSum" != "$actualSum" ]; then
-          # Msg "debug" "** dependency $dep changed"
-        # fi
-        while [ $(jobs -p | wc -l) -ge $PARALLELJOBS ]; do
-          Msg "info" "waiting for $PARALLELJOBS processes"
-          wait -n
-        done
-      fi
-    done; wait; )
-    false
-    if TargetChanged "$file"; then
-      Rebuild "$file" "$doPath" && AddIfChange "$file" "$file"
-      true
-    fi
-    } 3>>"$(TargetCreatesFile "$file")"
-  else
     if [ ! -e "$file" ]; then
-      Msg "abort" "No dofile found for $file"
+      BuildTarget "$file" "$doPath" && AddIfChange "$file" "$file"
     else
-      AddIfChange "$file" "$REDO_TARGET"
-      true
+      #NODE ** b) rebuild dependencies if necessary
+      SortFile "$(TargetChangesFile "$file")"
+      oldsum=$(Checksum "$(TargetChangesFile "$file")")
+      TargetDependencies "$file" | ( while read dep; do
+        [ "$dep" != "$file" ] && REDO_TARGET="$file" Redo "$dep" &
+      done; wait; )
+      SortFile "$(TargetChangesFile "$file")"
+      newsum=$(Checksum "$(TargetChangesFile "$file")")
+      #NODE ** c) verify computed dependencies
+      SortFile "$(TargetComputedChangesFile "$file")"
+      oldcsum=$(Checksum "$(TargetComputedChangesFile "$file")")
+      TargetComputedDependencies "$file" | while read dep; do
+        AddIfComputedChange "$dep" "$file";
+      done
+      SortFile "$(TargetComputedChangesFile "$file")"
+      newcsum=$(Checksum "$(TargetComputedChangesFile "$file")")
+      #NODE ** d) rebuild the target if its dependencies changed
+      oldtsum=$(DependencySum "$file" "$file")
+      newtsum=$(Checksum "$file")
+      [ "$oldsum" != "$newsum" ] && Msg info "'$file' dependencies changed"
+      [ "$oldcsum" != "$newcsum" ] && Msg info "'$file' computed dependencies changed"
+      [ "$oldtsum" != "$newtsum" ] && Msg info "'$file' checksum changed"
+      if [ "$oldsum" != "$newsum" ] || [ "$oldcsum" != "$newcsum" ] || [ "$oldtsum" != "$newtsum" ]; then
+        BuildTarget "$file" "$doPath" && AddIfChange "$file" "$file"
+      fi
+    fi
+  else
+    #NODE ** e) when the file is not a target:
+    if [ ! -e "$file" ]; then
+      Msg "abort" "No dofile found for '$file'"
     fi
   fi
+  [ -e "$file" ] && AddIfChange "$file" "$REDO_TARGET"
 }
-#@-others
-
+#NODE Main code
 case "$PROGNAME" in
+redo-ifcomputedchange)
+  [ -z "$REDO_TARGET" ] && Msg "abort" "REDO_TARGET not set"
+  [ -z "$BUILDDIR" ] && Msg "abort" "BUILDDIR not set"
+  [ -z "$METADIR" ] && Msg "abort" "METADIR not set"
+  for dep; do
+    #cd "$BUILDDIR"
+    dep="$(readlink -m "$dep")"
+    DEPDIR="$(dirname "$dep")"
+    #Msg debug "* redo-ifcomputedchange '$REDO_TARGET' '$dep'"
+    { mkdir -p "$DEPDIR"; cd "$DEPDIR" && Redo "$dep" && AddIfComputedChange "$dep" "$REDO_TARGET"; }&
+  done; wait
+;;
 redo-ifchange)
   [ -z "$REDO_TARGET" ] && Msg "abort" "REDO_TARGET not set"
   [ -z "$BUILDDIR" ] && Msg "abort" "BUILDDIR not set"
   [ -z "$METADIR" ] && Msg "abort" "METADIR not set"
   for dep; do
-    cd "$BUILDDIR"
+    #cd "$BUILDDIR"
     dep="$(readlink -m "$dep")"
-    Redo "$dep" && AddIfChange "$dep" "$REDO_TARGET"
-  done
+    DEPDIR="$(dirname "$dep")"
+    #Msg debug "* redo-ifchange '$REDO_TARGET' '$dep'"
+    { mkdir -p "$DEPDIR"; cd "$DEPDIR" && Redo "$dep"; }&
+  done; wait
 ;;
 redo-ifcreate)
   [ -z "$REDO_TARGET" ] && Msg "abort" "REDO_TARGET not set"
   [ -z "$BUILDDIR" ] && Msg "abort" "BUILDDIR not set"
   [ -z "$METADIR" ] && Msg "abort" "METADIR not set"
-  for arg; do
-    cd "$BUILDDIR"
-    arg="$(readlink -m "$arg")"
-    [ -e "$dep" ] && Msg "abort" "$dep exists but should be created by a dofile"
-    Redo "$dep" && AddIfCreate "$dep" "$REDO_TARGET"
-  done
+  for dep; do
+    dep="$(readlink -m "$dep")"
+    [ -e "$dep" ] && Msg "abort" "'$dep' exists but should be created by a dofile"
+    DEPDIR="$(dirname "$dep")"
+    #Msg debug "* redo-ifcreate '$REDO_TARGET' '$dep'"
+    { mkdir -p "$DEPDIR"; cd "$DEPDIR" && Redo "$dep" && AddIfCreate "$dep" "$REDO_TARGET"; }&
+  done; wait
 ;;
 redo)
   for arg; do
@@ -205,9 +281,12 @@ redo)
     REDO_TARGET="$arg"
     BUILDDIR="$(dirname "$arg")"
     METADIR="${BUILDDIR}/.redo"
+    #PARALLELJOBS=${PARALLELJOBS:=10}
+    export REDO_TARGET BUILDDIR METADIR
     cd "$BUILDDIR"
-    Redo "$arg"
-  done
+    #Msg debug "* redo '$arg'"
+    Redo "$arg" &
+    wait
+  done; wait
 ;;
 esac
-#@-leo

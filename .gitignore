@@ -1,5 +1,6 @@
-.redo
 *--redoing
 *.o
 *.d
 example/build/example
+*.bak
+\.redo
