@@ -3,6 +3,8 @@
 # See cr.yp.to/redo.html for more about redo
 # This work is placed in the Public Domain
 
+trap exit SIGINT SIGTERM
+PARALLELJOBS=${PARALLELJOBS:=4}
 PROGNAME="$(basename "$0")"
 
 #NODE Utilities
@@ -208,6 +210,9 @@ function Redo {
       oldsum=$(Checksum "$(TargetChangesFile "$file")")
       TargetDependencies "$file" | ( while read dep; do
         [ "$dep" != "$file" ] && REDO_TARGET="$file" Redo "$dep" &
+        # This only limits the number of processes per sub-target
+        # A true implementation need to implement the jobserver protocol
+        while [ $(jobs -p | wc -l) -ge $PARALLELJOBS ]; do wait -n; done
       done; wait; )
       SortFile "$(TargetChangesFile "$file")"
       newsum=$(Checksum "$(TargetChangesFile "$file")")
