@@ -3,9 +3,9 @@
 # See cr.yp.to/redo.html for more about redo
 # This work is placed in the Public Domain
 
-function onTerm { wait; exit 111; }
-trap onTerm SIGINT SIGTERM
-PARALLELJOBS=${PARALLELJOBS:=2}
+function onTerm { exit 111; }
+trap onTerm SIGINT SIGTERM SIGALRM
+PARALLELJOBS=${PARALLELJOBS:=10}
 PROGNAME="$(basename "$0")"
 
 #NODE Utilities
@@ -18,88 +18,176 @@ function Msg {
   esac
   echo "${level}${*}" >&2
   case "$level" in
-    error\:\ ) echo "${level}${*}" >"$ERROR_FIFO" ;;
-    abort\:\ ) echo "${level}${*}" >"$ERROR_FIFO"; exit 111 ;;
+    error\:\ ) [ -p "$ERROR_FIFO" ] && echo "${level}${*}" >"$ERROR_FIFO" ;;
+    abort\:\ ) [ -p "$ERROR_FIFO" ] && echo "${level}${*}" >"$ERROR_FIFO" ; onTerm ;;
   esac
 }
 #NODE * Basename
 # /home/user/t.a.b.c => t
-function Basename {
-  local bn="${1%%.*}"
-  echo "${bn##*/}"
-}
+function Basename { local bn="${1%%.*}"; echo "${bn##*/}"; }
 #NODE * BasenamePath
 # /home/user/t.a.b.c => /home/user/t
-function BasenamePath {
-  echo "${1%%\.*}"
-}
+function BasenamePath { echo "${1%%\.*}"; }
 #NODE * Extension
 # /home/user/t.a.b.c => a.b.c
-function Extension {
-  echo "${1#*.}"
+function Extension { echo "${1#*.}"; }
+#NODE * TempName
+function TempName { echo "$(mktemp -u -t "XXXXXX.tmp")"; }
+#NODE * Sleep
+function Sleep { ! read -t${1} -u$SLEEP_FD; }
+#NODE * CheckVariables
+function CheckVariables {
+  [ -z "$ERROR_FIFO" ] && Msg "abort" "${0} ${*}: ERROR_FIFO not set"
+  [ -z "$SLEEP_FD" ] && Msg "abort" "${0} ${*}: SLEEP_FD not set"
+  [ -z "$SUM_FIFO" ] && Msg "abort" "${0} ${*}: SUM_FIFO not set"
+  #[ -z "$SUM_FD" ] && Msg "abort" "${0} ${*}: SUM_FD not set"
+  [ -z "$REDO_TARGET" ] && Msg "abort" "${0} ${*}: REDO_TARGET not set"
+  [ -z "$BUILDDIR" ] && Msg "abort" "${0} ${*}: BUILDDIR not set"
+  [ -z "$METADIR" ] && Msg "abort" "${0} ${*}: METADIR not set"
+  [ -z "$LOCK_FIFO" ] && Msg "abort" "${0} ${*}: LOCK_FIFO not set"
+}
+#NODE Checksumming files faster
+#NODE * FileChecksum
+function FileChecksum {
+  [ ! -e "$1" ] && { echo '00000000000000000000000000000000'; return; }
+  md5sum -- "$1" | grep -oE '^.{32}'
+}
+#NODE * ChecksumDaemon
+function ChecksumDaemon {
+  trap - SIGINT SIGTERM SIGALRM
+  local retfifo
+  local file
+  local CHECKSUMS
+  declare -A CHECKSUMS
+  local counter=0
+  while Sleep 0.0001; do
+    [ -p "$SUM_FIFO" ] || { exit 111; }
+    if read -t0 -u$SUM_FD 2>/dev/null; then
+      IFS='|' read -t0.5 -u$SUM_FD retfifo file 2>/dev/null
+      if [ ! -z "$file" ]; then
+        if [ -z "${CHECKSUMS[$file]}" ]; then
+          AddFileToChecksum
+        fi
+        timeout -s9 1s sh -c "echo '${CHECKSUMS[$file]}' >'$retfifo'" 1>/dev/null 2>/dev/null &
+      elif [ "$retfifo" == "EXIT" ]; then
+        exit 0
+      fi
+    else
+      Sleep 0.01
+      counter=$((counter+100))
+    fi
+    counter=$((counter+1))
+    if [ $counter -gt 30000 ]; then
+      #Msg debug "Updating checksums..."
+      UpdateChecksums
+      counter=0;
+    fi
+  done
+}
+#NODE * PseudoChecksumFile
+function PseudoChecksumFile {
+  local k
+  for k in "${!CHECKSUMS[@]}"; do
+    echo "${CHECKSUMS[$k]}  $k"
+  done
+}
+#NODE * AddFileToChecksum
+function AddFileToChecksum {
+  [ -f "$file" ] && CHECKSUMS[$file]=$(FileChecksum "$file") || unset CHECKSUMS[$file]
+  #CHECKSUMS[$file]=$(FileChecksum "$file")
+}
+#NODE * ChangedFiles
+function ChangedFiles {
+  PseudoChecksumFile | md5sum --quiet --check - 2>/dev/null | sed -r 's/: [ A-Za-z]+$//'
+}
+#NODE * UpdateChecksums
+function UpdateChecksums {
+  local file
+  while read file; do
+    [ -z "$file" ] && continue
+    #Msg debug "Rehashing '$file'"
+    AddFileToChecksum
+  done <<< $(ChangedFiles)
 }
 #NODE * Checksum
 function Checksum {
-  [ ! -s "$1" ] && { echo '00000000000000000000000000000000'; return; }
-  md5sum "$1" | grep -oE '^.{32}'
-}
-#NODE * SortFile
-function SortFile {
-  local tmp="$(mktemp -t "XXXXXX.tmp")"
-  cat "$1" | sort -g -k1 > "$tmp"
-  mv -f "$tmp" "$1"
+  #local retfifo=$(TempName); mkfifo "$retfifo"
+  local file="$1"
+  local retfifo="$2"
+  local gotFifo=true
+  [ -z "$retfifo" ] && { gotFifo=false; retfifo=$(TempName); mkfifo "$retfifo"; }
+  [ -p "$SUM_FIFO" ] || { rm "$retfifo"; onTerm; }
+  local sum='00000000000000000000000000000000'
+  echo "${retfifo}|${file}" >"$SUM_FIFO"; read -t1 sum <"$retfifo"
+  $gotFifo || rm "$retfifo"
+  echo $sum
+  #echo "${retfifo}|${1}" >"$SUM_FIFO"; head -n1 "$retfifo"; rm "$retfifo"
 }
 #NODE Dependencies' database
 #NODE * TargetChangesFile
 # MD5 hashes of dependency files
-function TargetChangesFile {
-  echo "${METADIR}/${1}/md5.sum"
-}
+function TargetChangesFile { echo "${METADIR}/${1}/md5.sum"; }
 #NODE * TargetCreatesFile
-# Paths of files that must not exist at (re)build time (some dofile will create them)
-function TargetCreatesFile {
-  echo "${METADIR}/${1}/exists.txt"
-}
+# Paths of files that must not exist at (re)build time (some dofile will create each)
+function TargetCreatesFile { echo "${METADIR}/${1}/exists.txt"; }
 #NODE * TargetComputedChangesFile
 # MD5 hashes of computed dependencies (dependencies on executables' outputs)
-function TargetComputedChangesFile {
-  echo "${METADIR}/${1}/compmd5.sum"
-}
+function TargetComputedChangesFile { echo "${METADIR}/${1}/compmd5.sum"; }
 #NODE * AddIfChange
 function AddIfChange {
-  LockMetadata "$2" ifchange
-  local tmp="$(mktemp -t "XXXXXX.tmp")"
-  sed -r "\%^.{32}  ${1}$% d" "$(TargetChangesFile "$2")" > "$tmp"
-  md5sum "$1" >> "$tmp"
-  mv -f "$tmp" "$(TargetChangesFile "$2")"
-  ReleaseLock "$2" ifchange
+  local ret=false
+  local lock=$(LockMetadata "$2" ifchange)
+  local newsum=$(Checksum "$1")
+  local checkline=$(sed -r "\% ( |\*)${1}$% !d;" "$(TargetChangesFile "$2")" 2>/dev/null)
+  local oldsum=$(echo "$checkline" | sed -r "s%(^.{32}) ( |\*)${1}%\1%")
+  #local oldsum=$(sed -r "\% ( |\*)${1}$% !d; s%(^.{32}) ( |\*)${1}%\1%" "$(TargetChangesFile "$2")")
+  local wasTarget=$([ $(echo "$checkline" | grep -qF " *${1}"; echo $?;) -eq 0 ] && echo true || echo false)
+  local isTarget=$([ -z "$(DoPath "$1")" ] && echo true || echo false)
+  if [ "$oldsum" != "$newsum" ] || [ "$wasTarget" != "$isTarget" ]; then
+    ret=true
+    local tmp="$(mktemp -t "XXXXXX.tmp")"
+    sed -r "\%^.{32}\s?${1}$% d" "$(TargetChangesFile "$2")" > "$tmp" 2>/dev/null
+    $isTarget && echo "$newsum *${1}" >> "$tmp" || echo "$newsum  ${1}" >> "$tmp"
+    mv -f "$tmp" "$(TargetChangesFile "$2")" 2>/dev/null
+  fi
+  ReleaseLock "$lock"
+  $ret
 }
 #NODE * AddIfCreate
 function AddIfCreate {
-  LockMetadata "$2" ifcreate
+  local lock=$(LockMetadata "$2" ifcreate)
   local tmp="$(mktemp -t "XXXXXX.tmp")"
-  sed -r "\%^${1}$% d" "$(targetCreatesFile "$2")" > "$tmp"
+  sed -r "\%^${1}$% d" "$(targetCreatesFile "$2")" > "$tmp" 2>/dev/null
   echo "$1" >> "$tmp"
-  mv -f "$tmp" "$(targetCreatesFile "$2")"
-  ReleaseLock "$2" ifcreate
+  mv -f "$tmp" "$(targetCreatesFile "$2")" 2>/dev/null
+  ReleaseLock "$lock"
 }
 #NODE * AddIfComputedChange
 function AddIfComputedChange {
-  LockMetadata "$2" ifcomputedchange
+  local lock=$(LockMetadata "$2" ifcomputedchange)
   local tmp="$(mktemp -t "XXXXXX.tmp")"
-  sed -r "\%^.{32} \*${1}$% d" "$(TargetComputedChangesFile "$2")" > "$tmp"
+  local oldsum=$(ComputedSum "$1" "$2")
+  sed -r "\%^.{32}\s\*${1}$% d" "$(TargetComputedChangesFile "$2")" > "$tmp"
   cd "$(dirname "$1")"
   "$1" | md5sum -b - | sed -r "s%-$%${1}%" >> "$tmp"
-  mv -f "$tmp" "$(TargetComputedChangesFile "$2")"
-  ReleaseLock "$2" ifcomputedchange
+  mv -f "$tmp" "$(TargetComputedChangesFile "$2")" 2>/dev/null
+  local newsum=$(ComputedSum "$1" "$2")
+  ReleaseLock "$lock"
+  [ "$oldsum" != "$newsum" ]
 }
 #NODE * DependencySum
 function DependencySum {
-  sed -r "\%  ${1}$% !d; s%(^.{32})  ${1}%\1%" "$(TargetChangesFile "$2")"
+  sed -r "\% ( |\*)${1}$% !d; s%(^.{32}) ( |\*)${1}%\1%" "$(TargetChangesFile "$2")" 2>/dev/null
 }
 #NODE * ComputedSum
 function ComputedSum {
-  sed -r "\% \*${1}$% !d; s%(^.{32}) \*${1}%\1%" "$(TargetComputedChangesFile "$2")"
+  sed -r "\% \*${1}$% !d; s%(^.{32}) \*${1}%\1%" "$(TargetComputedChangesFile "$2")" 2>/dev/null
+}
+#NODE * DependenciesChanged
+function DependenciesChanged {
+  #local result=$(md5sum --status --check "$(TargetChangesFile "$1")" 2>/dev/null && echo false || echo true)
+  #$result
+  ! md5sum --status --check "$(TargetChangesFile "$1")" 2>/dev/null
 }
 #NODE * ClearMetadata
 function ClearMetadata {
@@ -113,25 +201,23 @@ function InitializeMetadata {
   mkdir -p "${METADIR}/${1}"
   touch "$(TargetChangesFile "$1")" "$(TargetCreatesFile "$1")" "$(TargetComputedChangesFile "$1")"
 }
-#NODE * LockMetadata
-function LockMetadata {
-  local lock="${METADIR}/${1}/${2}"
-  while ! mkdir "$lock" 2>/dev/null; do sleep 0.001; done
-}
-#NODE * ReleaseLock
-function ReleaseLock {
-  local lock="${METADIR}/${1}/${2}"
-  rmdir "$lock" 2>/dev/null
+#NODE Target/dependencies operations
+#NODE * IsTarget
+function IsTarget {
+  [ ! -z "$(DoPath "$1")" ]
 }
 #NODE * TargetDependencies
 function TargetDependencies {
-  [ -s "$(TargetChangesFile "$1")" ] && sed -r 's/^.{32}  //' "$(TargetChangesFile "$1")"
+  [ -s "$(TargetChangesFile "$1")" ] && sed -r 's/^.{32} ( |\*)//' "$(TargetChangesFile "$1")" 2>/dev/null
+}
+#NODE * TargetSubTargets
+function TargetSubTargets {
+  sed -r "\%^.{32} \*% !d; s%(^.{32}) \*%\1%" "$(TargetChangesFile "$1")" 2>/dev/null
 }
 #NODE * TargetComputedDependencies
 function TargetComputedDependencies {
-  [ -s "$(TargetComputedChangesFile "$1")" ] && sed -r 's/^.{32} \*//' "$(TargetComputedChangesFile "$1")"
+  [ -s "$(TargetComputedChangesFile "$1")" ] && sed -r 's/^.{32} \*//' "$(TargetComputedChangesFile "$1")" 2>/dev/null
 }
-#NODE Target/dependencies operations
 #NODE * TargetCantCreate
 function TargetCantCreate {
   ! xargs -a "$(TargetCreatesFile "$1")" -r -I% \[ ! -e "%" \]
@@ -152,7 +238,6 @@ function DoPath {
 function BuildTarget {
   local target="$1"
   local doPath="$2"
-  [ -z "$doPath" ] && doPath="$(DoPath "$target")"
   local tmp="${target}--redoing"
   local RC=111
   ClearMetadata "$target"
@@ -166,76 +251,207 @@ function BuildTarget {
   RC=$?
   if [ $RC -ne 0 ]; then
     Msg "error" "Dofile '$doPath', while building '$target', exited with a non-zero exit code: $RC"
-    rm -f "$tmp" "$target"
+    rm -f "$tmp"
+    [ -s "$target" ] || rm -f "$target"
     exit $RC
   elif [ -s "$tmp" ]; then
-    mv -f "$tmp" "$target"
+    mv -f "$tmp" "$target" 2>/dev/null
     true
   else
-    rm -f "$tmp" "$target"
+    rm -f "$tmp"
+    [ -s "$target" ] || rm -f "$target"
     false
   fi
+}
+#NODE * RedoAllFiles
+function RedoAllFiles {
+  local target="$1"
+  local dep
+  while read dep; do
+    if [ ! -z "$dep" ] && [ "$dep" != "$target" ]; then
+      REDO_TARGET="$target" Redo "$dep" &
+    fi
+    # This only limits the number of processes per sub-target
+    # A true implementation need to implement the jobserver protocol
+    while [ $(jobs -p | wc -l) -ge $PARALLELJOBS ]; do wait -n; done
+  done <<< $(TargetDependencies "$target")
+  wait
+}
+#NODE * RedoSubTargets
+function RedoSubTargets {
+  local target="$1"
+  local subtarget
+  local ret=false
+  TargetDependencies "$file" | ( while read subtarget; do
+    if [ ! -z "$subtarget" ] && [ "$subtarget" != "$target" ] && IsTarget "$subtarget"; then
+      { REDO_TARGET="$target" Redo "$subtarget" && echo true; }&
+      # This only limits the number of processes per sub-target
+      # A true implementation need to implement the jobserver protocol
+      while [ $(jobs -p | wc -l) -ge $PARALLELJOBS ]; do wait -n; done
+    fi
+  done; wait; ) | grep -qF true && ret=true
+  $ret
+}
+#NODE * RedoTarget
+function RedoTarget {
+  local file="$1"
+  local doPath="$2"
+  InitializeMetadata "$file"
+  #NODE ** a) Verify redo-ifcreate files, they must be created by a dofile
+  if TargetCantCreate "$file"; then
+    Msg "error" "While rebuilding '$file', the following files should not exist:"
+    xargs -a "$(TargetCreatesFile "$file")" -r -I% find "%" 2>/dev/null
+    exit 111
+  fi
+  local lock=$(LockMetadata "$file" target)
+  #Msg debug "Target '$file' LOCKED"
+  if [ ! -s "$file" ]; then
+    #NODE ** b) Rebuild the target if the file don't exist
+    BuildTarget "$file" "$doPath" && AddIfChange "$file" "$file"
+  else
+    #NODE ** c) Redo sub-targets and check dependencies
+    local depsChanged=false
+    if DependenciesChanged "$file"; then
+      depsChanged=true
+      RedoAllFiles "$file"
+    else
+      RedoSubTargets "$file" && depsChanged=true
+    fi
+    #NODE ** d) Verify computed dependencies
+    local computedChanged=false
+    local cdep
+    while read cdep; do
+      if [ ! -z "$cdep" ]; then
+        AddIfComputedChange "$cdep" "$file" && computedChanged=true
+      fi
+    done <<< $(TargetComputedDependencies "$file")
+    #NODE ** e) Rebuild the target if its dependencies changed
+    #$depsChanged && Msg info "Target '$file' dependencies changed"
+    #$computedChanged && Msg info "Target '$file' computed dependencies changed"
+    if $depsChanged || $computedChanged; then
+      BuildTarget "$file" "$doPath" && AddIfChange "$file" "$file"
+    fi
+  fi
+  ReleaseLock "$lock"
+  #Msg debug "Target '$file' UNLOCKED"
+}
+#NODE * RedoFile
+function RedoFile {
+  local file="$1"
+  [ -e "$file" ] || Msg "abort" "While redoing target '$REDO_TARGET', no dofile found for '$file'"
 }
 #NODE * Redo
 function Redo {
   local file="$1"
   local doPath="$(DoPath "$file")"
   if [ ! -z "$doPath" ]; then
-    local dep
-    InitializeMetadata "$file"
-    #NODE ** a) verify files that must be created by a dofile
-    if TargetCantCreate "$file"; then
-      Msg "error" "While rebuilding '$file', the following files should be created by a dofile but already exist:"
-      xargs -a "$(TargetCreatesFile "$file")" -r -I% find "%" 2>/dev/null
-      exit 111
-    fi
-    LockMetadata "$file" target
-    if [ ! -s "$file" ]; then
-      BuildTarget "$file" "$doPath" && AddIfChange "$file" "$file"
-    else
-      #NODE ** b) rebuild dependencies if necessary
-      SortFile "$(TargetChangesFile "$file")"
-      oldsum=$(Checksum "$(TargetChangesFile "$file")")
-      TargetDependencies "$file" | ( while read dep; do
-        [ "$dep" != "$file" ] && { REDO_TARGET="$file" Redo "$dep"; }&
-        # This only limits the number of processes per sub-target
-        # A true implementation need to implement the jobserver protocol
-        while [ $(jobs -p | wc -l) -ge $PARALLELJOBS ]; do wait -n; done
-      done; wait; )
-      SortFile "$(TargetChangesFile "$file")"
-      newsum=$(Checksum "$(TargetChangesFile "$file")")
-      #NODE ** c) verify computed dependencies
-      SortFile "$(TargetComputedChangesFile "$file")"
-      oldcsum=$(Checksum "$(TargetComputedChangesFile "$file")")
-      TargetComputedDependencies "$file" | while read dep; do
-        AddIfComputedChange "$dep" "$file";
-      done
-      SortFile "$(TargetComputedChangesFile "$file")"
-      newcsum=$(Checksum "$(TargetComputedChangesFile "$file")")
-      #NODE ** d) rebuild the target if its dependencies changed
-      oldtsum=$(DependencySum "$file" "$file")
-      newtsum=$(Checksum "$file")
-      [ "$oldsum" != "$newsum" ] && Msg info "Target '$file' dependencies changed ($oldsum -> $newsum)"
-      [ "$oldcsum" != "$newcsum" ] && Msg info "Target '$file' computed dependencies changed ($oldcsum -> $newcsum)"
-      [ "$oldtsum" != "$newtsum" ] && Msg info "Target '$file' checksum changed ($oldtsum -> $newtsum)"
-      if [ "$oldsum" != "$newsum" ] || [ "$oldcsum" != "$newcsum" ] || [ "$oldtsum" != "$newtsum" ]; then
-        BuildTarget "$file" "$doPath" && AddIfChange "$file" "$file";
-      fi
-    fi
-    ReleaseLock "$file" target
+    RedoTarget "$file" "$doPath"
   else
-    #NODE ** e) when the file is not a target:
-    [ -e "$file" ] || Msg "abort" "While redoing target '$REDO_TARGET', no dofile found for '$file'"
+    RedoFile "$file"
   fi
-  [ -s "$file" ] && AddIfChange "$file" "$REDO_TARGET";
+  AddIfChange "$file" "$REDO_TARGET"
+}
+#NODE Locking procedures
+#NODE * LockMetadata
+function LockMetadata {
+  local lock="$(echo "$*" | md5sum -b - | grep -oE '^.{32}')"
+  [ -p "$LOCK_FIFO" ] || onTerm
+  #sh -c 'echo "'$lock' $$" >"$LOCK_FIFO"; kill -STOP $$' & wait -n
+  echo $lock $BASHPID >"$LOCK_FIFO"; kill -STOP $BASHPID
+  echo $lock
+}
+#NODE * ReleaseLock
+function ReleaseLock {
+  local lock="$1"
+  [ -p "$LOCK_FIFO" ] && echo "$lock" >"$LOCK_FIFO" || onTerm
+}
+#NODE * LockDaemon
+function LockDaemon {
+  trap - SIGINT SIGTERM SIGALRM
+  local locks
+  local waitqueue
+  declare -A locks
+  declare -A waitqueue
+  while Sleep 0.00001; do
+    local resource
+    local pid
+    [ -p "$LOCK_FIFO" ] || { ForEachLockRequest FinalizeRequests; exit 111; }
+    if read -t0 -u$LOCK_FD 2>/dev/null; then
+      read -t0.1 -u$LOCK_FD resource pid 2>/dev/null
+      if [ ! -z "$pid" ]; then
+        #Msg debug New lock requesting $resource from $pid
+        AppendPid $resource $pid
+      else
+        #Msg debug New unlock request for $resource
+        [ "$resource" != "EXIT" ] && Unlock $resource || { ForEachLockRequest FinalizeRequests; exit 0; }
+      fi
+    else
+      Sleep 0.1
+    fi
+    ForEachLockRequest TryLock
+  done
+}
+#NODE * AppendPid 
+function AppendPid {
+  local resource=$1
+  local pid=$2
+  waitqueue[$resource]+="$pid "
+  #Msg debug "$1:${waitqueue[$1]}"
+}
+#NODE * PeekPid
+function PeekPid {
+  local resource=$1
+  local pid=$(echo "${waitqueue[$resource]}" | awk '{print $1;}')
+  [ ! -z "$pid" ] && echo $pid
+}
+#NODE * NextPid
+function NextPid {
+  local resource=$1
+  waitqueue[$resource]="${waitqueue[$resource]#* }"
+  [ -z "${waitqueue[$resource]}" ] && unset waitqueue[$resource]
+  #Msg debug "$1:${waitqueue[$1]}"
+}
+#NODE * Unlock
+function Unlock {
+  local resource=$1
+  unset locks[$resource]
+  #Msg debug $resource UNLOCKED
+}
+#NODE * ForEachLockRequest
+function ForEachLockRequest {
+  for resource in ${!waitqueue[@]}; do
+    ${1}
+  done
+}
+#NODE * IsUnlocked
+function IsUnlocked {
+  local resource=$1
+  [ -z "${locks[$resource]}" ]
+}
+#NODE * TryLock
+function TryLock {
+  IsUnlocked $resource && {
+    pid=$(PeekPid $resource)
+    NextPid $resource
+    [ -z "$pid" ] && return
+    locks[$resource]=$pid
+    #Msg debug $resource LOCKED by $pid
+    kill -CONT $pid; }
+}
+#NODE * FinalizeRequests
+function FinalizeRequests {
+  Msg debug "Lock Daemon: Finalizing $resource"
+  while test ${waitqueue[$resource]+_}; do
+    pid=$(PeekPid $resource)
+    NextPid $resource
+    [ ! -z "$pid" ] && { kill -KILL $pid; }
+  done
 }
 #NODE Main code
 case "$PROGNAME" in
+#NODE * redo-ifcomputedchange
 redo-ifcomputedchange)
-  [ -z "$ERROR_FIFO" ] && exit 111
-  [ -z "$REDO_TARGET" ] && Msg "abort" "redo-ifcomputedchange ${*}: REDO_TARGET not set"
-  [ -z "$BUILDDIR" ] && Msg "abort" "redo-ifcomputedchange ${*}: BUILDDIR not set"
-  [ -z "$METADIR" ] && Msg "abort" "redo-ifcomputedchange ${*}: METADIR not set"
+  CheckVariables
   for dep; do
     dep="$(readlink -m "$dep")"
     DEPDIR="$(dirname "$dep")"
@@ -243,11 +459,9 @@ redo-ifcomputedchange)
     while [ $(jobs -p | wc -l) -ge $PARALLELJOBS ]; do wait -n; done
   done; wait
 ;;
+#NODE * redo-ifchange
 redo-ifchange)
-  [ -z "$ERROR_FIFO" ] && exit 111
-  [ -z "$REDO_TARGET" ] && Msg "abort" "redo-ifchange ${*}: REDO_TARGET not set"
-  [ -z "$BUILDDIR" ] && Msg "abort" "redo-ifchange ${*}: BUILDDIR not set"
-  [ -z "$METADIR" ] && Msg "abort" "redo-ifchange ${*}: METADIR not set"
+  CheckVariables
   for dep; do
     dep="$(readlink -m "$dep")"
     DEPDIR="$(dirname "$dep")"
@@ -255,11 +469,9 @@ redo-ifchange)
     while [ $(jobs -p | wc -l) -ge $PARALLELJOBS ]; do wait -n; done
   done; wait
 ;;
+#NODE * redo-ifcreate
 redo-ifcreate)
-  [ -z "$ERROR_FIFO" ] && exit 111
-  [ -z "$REDO_TARGET" ] && Msg "abort" "redo-ifcreate ${*}: REDO_TARGET not set"
-  [ -z "$BUILDDIR" ] && Msg "abort" "redo-ifcreate ${*}: BUILDDIR not set"
-  [ -z "$METADIR" ] && Msg "abort" "redo-ifcreate ${*}: METADIR not set"
+  CheckVariables
   for dep; do
     dep="$(readlink -m "$dep")"
     [ -e "$dep" ] && Msg "abort" "For target '$REDO_TARGET', '$dep' exists but should be created by a dofile"
@@ -268,24 +480,39 @@ redo-ifcreate)
     while [ $(jobs -p | wc -l) -ge $PARALLELJOBS ]; do wait -n; done
   done; wait
 ;;
+#NODE * redo
 redo|redo.sh)
-  ERROR_FIFO="$(mktemp -u -t "XXXXXX.tmp")"
-  mkfifo "$ERROR_FIFO"; exec 3<>"$ERROR_FIFO"; rm "$ERROR_FIFO"
-  ERROR_FIFO=/proc/self/fd/3
-  for arg; do
-    arg="$(readlink -m "$arg")"
-    REDO_TARGET="$arg"
-    BUILDDIR="$(dirname "$arg")"
+  ERROR_FIFO="$(TempName)"; mkfifo "$ERROR_FIFO" 2>/dev/null || Msg abort "Error fifo creation failed"
+  SLEEP_FIFO="$(TempName)"; mkfifo "$SLEEP_FIFO" 2>/dev/null || Msg abort "Sleep fifo creation failed"
+  SUM_FIFO="$(TempName)"; mkfifo "$SUM_FIFO" 2>/dev/null || Msg abort "Sum fifo creation failed"
+  LOCK_FIFO="$(TempName)"; mkfifo "$LOCK_FIFO" 2>/dev/null || Msg abort "Lock fifo creation failed"
+  exec {ERROR_FD}<>"$ERROR_FIFO"; exec {SLEEP_FD}<>"$SLEEP_FIFO"
+  exec {SUM_FD}<>"$SUM_FIFO"; exec {LOCK_FD}<>"$LOCK_FIFO"
+  rm -f "$ERROR_FIFO" "$SLEEP_FIFO" "$SUM_FIFO" "$LOCK_FIFO"
+  ERROR_FIFO=/proc/self/fd/$ERROR_FD; SLEEP_FIFO=/proc/self/fd/$SLEEP_FD
+  SUM_FIFO=/proc/self/fd/$SUM_FD; LOCK_FIFO=/proc/self/fd/$LOCK_FD
+  export ERROR_FIFO SLEEP_FD SUM_FIFO LOCK_FIFO
+  ChecksumDaemon &
+  LockDaemon &
+  ( for arg; do
+    REDO_TARGET="$(readlink -m "$arg")"
+    BUILDDIR="$(dirname "$REDO_TARGET")"
     METADIR="${BUILDDIR}/.redo"
-    ( export REDO_TARGET BUILDDIR METADIR ERROR_FIFO; cd "$BUILDDIR"; Redo "$arg" )&
+    ( export REDO_TARGET BUILDDIR METADIR
+      mkdir -p "$METADIR"
+      function onTerm { exit 111; }
+      trap onTerm SIGINT SIGTERM SIGALRM
+      cd "$BUILDDIR"; Redo "$REDO_TARGET"; onTerm; )&
     while [ $(jobs -p | wc -l) -ge $PARALLELJOBS ]; do wait -n; done
-  done; wait
-  read -u3 -t0 && {
-    Msg alert "Build failed, failure reasons:"
-    while read -u3  msg; do
+  done; wait; )
+  echo "EXIT" >"$LOCK_FIFO"
+  echo "EXIT" >"$SUM_FIFO"
+  read -u$ERROR_FD -t0 && {
+    Msg alert "Collected failure messages:"
+    while read -t0.1 -u$ERROR_FD  msg; do
       Msg info "* ${msg}"
-    done; exit 1; }
-  exec 3>&-
+    done; exit 1;
+  }
 ;;
 esac
 exit 0
